@@ -1,0 +1,116 @@
+#!/bin/bash
+
+file=$(date +%F).md
+logdir=$HOME/logs
+tmpfile=(/tmp/$(echo -n "$$" | md5sum))
+
+function commit() {
+    cd $logdir
+
+    while true ; do
+        case "$1" in
+            "") break ;;
+            *) git add $1; shift ;;
+        esac
+    done
+
+    git commit -m "Auto-commit"
+    cd -
+}
+
+function new() {
+    vim -c 'set syntax=markdown' $tmpfile
+    if [ -z "$(cat $tmpfile)" ] ; then
+        echo "No changes."
+    else 
+        echo -e "\n\n# $(date)\n\n$(cat $tmpfile)" >> $logdir/$file
+        commit $file
+    fi
+}
+
+function encapsulate_html() {
+    read -r -d '' VAR << EOM
+<head>
+    <link rel="stylesheet" type="text/css" href="http://skutnik.iiens.net/github_like.css">
+    <meta charset="utf-8">
+</head>
+<body>
+$1
+</body>
+EOM
+
+    echo "$VAR"
+}
+
+function attach() {
+    attach_dir=$logdir/$(date +%F)_files
+
+    mkdir -p $attach_dir
+
+    while true ; do
+        case "$1" in
+            "") break ;;
+            *) cp $1 $attach_dir/ ; shift ;;
+        esac
+    done
+
+    commit $attach_dir
+}
+
+function query() {
+    query=$logdir/$file
+
+    while true ; do
+        case "$1" in
+            all) query=$(find $logdir -name '*.md') ; break ;;
+            week) break ;;
+            "") break ;;
+            *) cp $1 $attach_dir/ ; shift ;;
+        esac
+    done
+
+    echo $query
+}
+
+function view() {
+    toview=$(query $@)
+
+    for f in $toview
+    do
+        cat "$f" >> $tmpfile
+        echo -e "\n\n" >> $tmpfile
+    done
+
+    vim -R -c 'set syntax=markdown' $tmpfile
+}
+
+function html() {
+    toexp=$(query $@)
+
+    for f in $toview
+    do
+        cat $f >> $tmpfile
+        echo -e "\n\n" >> $tmpfile
+    done
+
+    encapsulate_html "$(markdown2 --extras fenced-code-blocks \
+                --extras cuddled-lists \
+                --extras numbering \
+                --extras tables \
+                $toexp)" > $tmpfile
+
+    firefox $tmpfile
+}
+
+while true ; do
+    case "$1" in
+        #-c|--css) css="$2" ; shift 2 ;;
+        view) shift; view $@ ; exit;;
+        html) shift; html $@ ; exit ;;
+        attach) shift; attach $@ ; exit ;;
+        "") break ;;
+        *) target="$target$1 " ; shift ;;
+    esac
+done
+
+new
