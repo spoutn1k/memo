@@ -4,6 +4,16 @@ file=$(date +%F).md
 logdir=$HOME/logs
 tmpfile=(/tmp/$(echo -n "$$" | md5sum))
 
+if ! [ -e $logdir ] ; then
+	mkdir -p $logdir
+fi
+
+if ! [ -e $logdir/.git ] ; then
+	cd $logdir
+	git init
+	cd -
+fi
+
 function commit() {
     cd $logdir
 
@@ -57,23 +67,76 @@ function attach() {
     commit $attach_dir
 }
 
-function query() {
-    query=$logdir/$file
+function dates() {
+	query=$(date +%F)
+
+	files="$(find $logdir -name '*.md' \
+				| sort \
+				| rev \
+				| cut -d '/' -f 1 \
+				| rev \
+				| cut -d '.' -f 1 )"
+
+	for day in $(seq 0 $[ $(date +%u) - 1 ] )
+	do
+		week="$week$(date -d"last-monday +$day days" +%F)\n"
+	done
+
+	week="$(echo -e ${week::-2})"
 
     while true ; do
         case "$1" in
-            all) query=$(find $logdir -name '*.md') ; break ;;
-            week) break ;;
+            all) query=$files ; break ;;
+			week) query=$week ; break ;;
+			day)  break ;;
             "") break ;;
-            *) cp $1 $attach_dir/ ; shift ;;
+            *) echo -e "Invalid query: $1\nPossible values include {all, week, day}" >&2 ; exit 1 ;;
         esac
     done
 
-    echo $query
+	echo "$query"
+}
+
+function query() {
+	what=$1; shift
+
+	raw="$(dates $@)"
+
+	if [ $? -eq 1 ] ; then
+		exit 1
+	fi
+
+	list=""
+
+	for date in $raw
+	do
+		target=$logdir/$date.md
+		if [ $what = f -o $what = a ] ; then
+			if [ -e $target ] ; then
+				list="$list$target\n"
+			fi
+		fi
+
+		if [ $what = d -o $what = a ] ; then
+			attch_dir=$(echo $logdir/$date)_files
+			if [ -e $attch_dir ] ; then
+				for attach in $(find $attch_dir -type f)
+				do
+					list="$list$attach\n"
+				done
+			fi
+		fi
+	done
+
+	echo -e ${list::-2}
 }
 
 function view() {
-    toview=$(query $@)
+    toview=$(query f $@)
+
+	if [ $? -eq 1 ] ; then
+		exit 1
+	fi
 
     for f in $toview
     do
@@ -85,7 +148,11 @@ function view() {
 }
 
 function html() {
-    toexp=$(query $@)
+    toexp=$(query f $@)
+
+	if [ $? -eq 1 ] ; then
+		exit 1
+	fi
 
     for f in $toview
     do
@@ -93,21 +160,48 @@ function html() {
         echo -e "\n\n" >> $tmpfile
     done
 
-    encapsulate_html "$(markdown2 --extras fenced-code-blocks \
+    echo "$(markdown2 --extras fenced-code-blocks \
                 --extras cuddled-lists \
                 --extras numbering \
                 --extras tables \
-                $toexp)" > $tmpfile
+                $toexp)"
+}
 
-    firefox $tmpfile
+function link_helper() {
+	relpath=$(echo $1 | sed "s=$logdir/==")
+    read -r -d '' VAR << EOM
+<a href="./files/$relpath">$(basename $1)</a>
+EOM
+
+    echo "$VAR"
+}
+
+function file_reference() {
+	html=""
+
+	for file in $@
+	do
+		html=$html$(link_helper $file)
+	done
+
+	echo $html
+}
+
+function pack() {
+	file_reference $(query d $@) >> /tmp/index.html
+	html $@ >> /tmp/index.html
+
+
+	echo "$topack + $(query d $@)"
 }
 
 while true ; do
     case "$1" in
-        #-c|--css) css="$2" ; shift 2 ;;
-        view) shift; view $@ ; exit;;
-        html) shift; html $@ ; exit ;;
         attach) shift; attach $@ ; exit ;;
+		query) shift; query a $@ ; exit ;;
+        view) shift; view $@ ; exit ;;
+		html) shift; encapsulate_html "$(html $@)" > $tmpfile ; firefox $tmpfile ; exit ;;
+        pack) shift; pack $@ ; exit ;;
         "") break ;;
         *) target="$target$1 " ; shift ;;
     esac
