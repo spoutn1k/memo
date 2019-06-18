@@ -11,7 +11,7 @@ fi
 if ! [ -e $logdir/.git ] ; then
 	cd $logdir
 	git init
-	cd -
+	cd - > /dev/null
 fi
 
 function commit() {
@@ -25,7 +25,7 @@ function commit() {
     done
 
     git commit -m "Auto-commit"
-    cd -
+    cd - > /dev/null
 }
 
 function new() {
@@ -79,7 +79,11 @@ function dates() {
 
 	for day in $(seq 0 $[ $(date +%u) - 1 ] )
 	do
-		week="$week$(date -d"last-monday +$day days" +%F)\n"
+        if [ $(date +%u) -eq 1 ] ; then
+            week="$(date +%F)\n"
+        else
+            week="$week$(date -d"last-monday +$day days" +%F)\n"
+        fi
 	done
 
 	week="$(echo -e ${week::-2})"
@@ -90,7 +94,7 @@ function dates() {
 			week) query=$week ; break ;;
 			day)  break ;;
             "") break ;;
-            *) echo -e "Invalid query: $1\nPossible values include {all, week, day}" >&2 ; exit 1 ;;
+            *) echo -e "Error: invalid date: $1\nPossible values include {all, week, day}" >&2 ; exit 1 ;;
         esac
     done
 
@@ -118,20 +122,22 @@ function query() {
 		fi
 
 		if [ $what = d -o $what = a ] ; then
-			attch_dir=$(echo $logdir/$date)_files
-			if [ -e $attch_dir ] ; then
-				for attach in $(find $attch_dir -type f)
-				do
-					list="$list$attach\n"
-				done
+			attach_dir=$(echo $logdir/$date)_files
+			if [ -e $attach_dir ] ; then
+				list="$list$attach_dir\n"
 			fi
 		fi
 	done
 
-	echo -e ${list::-2}
+    if [ -z $list ] ; then
+        echo "Error: query: no results found for $raw" >&2
+        exit 1
+    else
+	    echo -e ${list::-2}
+    fi
 }
 
-function view() {
+function action_view() {
     toview=$(query f $@)
 
 	if [ $? -eq 1 ] ; then
@@ -168,40 +174,96 @@ function html() {
 }
 
 function link_helper() {
+    if [ -d $1 ] ; then
+        echo "Skipping link to directory $1" >&2
+        exit
+    fi
+
 	relpath=$(echo $1 | sed "s=$logdir/==")
     read -r -d '' VAR << EOM
-<a href="./files/$relpath">$(basename $1)</a>
+<li>
+    <a href="./$relpath">$(basename $1)</a>
+</li>
 EOM
 
     echo "$VAR"
 }
 
 function file_reference() {
-	html=""
+	html="<h3>List of attached files</h3><ul>"
 
-	for file in $@
-	do
-		html=$html$(link_helper $file)
-	done
+	for dir in $@
+    do
+        cd $dir/..
+        for file in $(find $(basename $dir))
+	    do
+		    html="$html$(link_helper $file)"
+	    done
+        cd - > /dev/null
+    done
 
-	echo $html
+	echo "$html</ul>"
 }
 
-function pack() {
-	file_reference $(query d $@) >> /tmp/index.html
+function action_html() {
+    html_source=$(html $@)
+
+	if [ $? -eq 1 ] ; then
+        echo "Error: action_html: error converting to HTML" >&2
+		exit 1
+	fi
+
+    encapsulate_html "$html_source" > $tmpfile
+
+    firefox $tmpfile
+}
+
+function action_pack() {
+    archive=/tmp/memo.$$.tar
+    query=$(query d $@)
+
+	if [ $? -eq 1 ] ; then
+		exit 1
+	fi
+
+	file_reference "$query" > /tmp/index.html
 	html $@ >> /tmp/index.html
 
+	if [ $? -eq 1 ] ; then
+		exit 1
+	fi
 
-	echo "$topack + $(query d $@)"
+    encapsulate_html "$(cat /tmp/index.html)" > /tmp/index.html
+
+    tar -cf $archive -C /tmp index.html
+
+	for attach in $(query d $@)
+    do
+        cd $attach
+        tar -rf $archive -C .. $(basename $attach)
+        cd - > /dev/null
+    done
+
+    xz -z $archive -c 2>/dev/null
+
+    if [ $? -eq 1 ] ; then
+        echo -e "Avoiding writing compressed data to a terminal.\nPipe this command's output into a file." >&2
+        exit 1
+    fi
+}
+
+function action_edit() {
+    vim  $logdir
 }
 
 while true ; do
     case "$1" in
         attach) shift; attach $@ ; exit ;;
 		query) shift; query a $@ ; exit ;;
-        view) shift; view $@ ; exit ;;
-		html) shift; encapsulate_html "$(html $@)" > $tmpfile ; firefox $tmpfile ; exit ;;
-        pack) shift; pack $@ ; exit ;;
+        view) shift; action_view $@ ; exit ;;
+		html) shift; action_html $@ ; exit ;;
+        pack) shift; action_pack $@ ; exit ;;
+        edit) shift; action_edit $@ ; exit ;;
         "") break ;;
         *) target="$target$1 " ; shift ;;
     esac
