@@ -30,8 +30,8 @@ function commit() {
 
 function new() {
     vim -c 'set syntax=markdown' $tmpfile
-    if [ -z "$(cat $tmpfile)" ] ; then
-        echo "No changes."
+    if [ -z "$(cat $tmpfile 2>/dev/null)" ] ; then
+        echo "No changes." >&2
     else 
         echo -e "\n\n# $(date)\n\n$(cat $tmpfile)" >> $logdir/$file
         commit $file
@@ -67,9 +67,14 @@ function attach() {
     commit $attach_dir
 }
 
-function dates() {
-	query=$(date +%F)
+function validdate() {
+    [[ "$1" =~ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && exit 0
 
+    echo -e "Error: invalid date: $1\nPossible values include {all, week, day, YYYY-MM-DD}" >&2
+    exit 1
+}
+
+function dates() {
 	files="$(find $logdir -name '*.md' \
 				| sort \
 				| rev \
@@ -90,15 +95,19 @@ function dates() {
 
     while true ; do
         case "$1" in
-            all) query=$files ; break ;;
-			week) query=$week ; break ;;
-			day)  break ;;
+            all) query="$files $query" ; shift ;;
+			week) query="$week $query" ; shift ;;
+			day) shift ;;
             "") break ;;
-            *) echo -e "Error: invalid date: $1\nPossible values include {all, week, day}" >&2 ; exit 1 ;;
+        *) if $(validdate $1) ; then query="$1 $query" ; fi ; shift ;;
         esac
     done
 
-	echo "$query"
+    if [ -z "$query" ] ; then
+        echo $(date +%F)
+    else
+	    echo "$query"
+    fi
 }
 
 function query() {
@@ -130,10 +139,20 @@ function query() {
 	done
 
     if [ -z $list ] ; then
-        echo "Error: query: no results found for $raw" >&2
+        if [ $what = d ] ; then
+            lookingfor=directories
+        else 
+            if [ $what = f ] ; then
+                lookingfor=files
+            else
+                lookingfor=results
+            fi
+        fi
+
+        echo "Error: query: no $lookingfor found for query $raw" >&2
         exit 1
     else
-	    echo -e ${list::-2}
+	    echo -e ${list::-2} | sort
     fi
 }
 
@@ -151,6 +170,17 @@ function action_view() {
     done
 
     vim -R -c 'set syntax=markdown' $tmpfile
+}
+
+function action_query() {
+    if ! [ "$1" = d -o "$1" = f ] ; then
+        modifier=a
+    else
+        modifier=$1
+        shift
+    fi
+
+    query $modifier $@
 }
 
 function html() {
@@ -223,7 +253,7 @@ function action_pack() {
     query=$(query d $@)
 
 	if [ $? -eq 1 ] ; then
-		exit 1
+		echo "No attached files detected" >&2
 	fi
 
 	file_reference "$query" > /tmp/index.html
@@ -237,7 +267,7 @@ function action_pack() {
 
     tar -cf $archive -C /tmp index.html
 
-	for attach in $(query d $@)
+	for attach in $query
     do
         cd $attach
         tar -rf $archive -C .. $(basename $attach)
@@ -259,7 +289,7 @@ function action_edit() {
 while true ; do
     case "$1" in
         attach) shift; attach $@ ; exit ;;
-		query) shift; query a $@ ; exit ;;
+		query) shift; action_query $@ ; exit ;;
         view) shift; action_view $@ ; exit ;;
 		html) shift; action_html $@ ; exit ;;
         pack) shift; action_pack $@ ; exit ;;
