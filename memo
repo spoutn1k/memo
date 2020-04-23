@@ -1,8 +1,11 @@
 #!/bin/bash
 
-file=$(date +%F).md
-logdir=$HOME/logs
-tmpfile=(/tmp/$(echo -n "$$" | md5sum))
+filename=$(date +%F)
+file=$filename.md
+logdir=/var/www/logs
+tmpfile=(/tmp/memo$(echo -n "$$" | md5sum))
+
+css='css/default.css'
 
 if ! [ -e $logdir ] ; then
 	mkdir -p $logdir
@@ -20,11 +23,13 @@ function commit() {
     while true ; do
         case "$1" in
             "") break ;;
+			"all") git add .; shift ;;
             *) git add $1; shift ;;
         esac
     done
 
     git commit -m "Auto-commit"
+	git push
     cd - > /dev/null
 }
 
@@ -35,13 +40,15 @@ function new() {
     else 
         echo -e "\n\n# $(date)\n\n$(cat $tmpfile)" >> $logdir/$file
         commit $file
+		action_html
+		cp $tmpfile $logdir/$filename.html
     fi
 }
 
 function encapsulate_html() {
     read -r -d '' VAR << EOM
 <head>
-    <link rel="stylesheet" type="text/css" href="http://skutnik.iiens.net/github_like.css">
+    <link rel="stylesheet" type="text/css" href="$css">
     <meta charset="utf-8">
 </head>
 <body>
@@ -244,8 +251,6 @@ function action_html() {
 	fi
 
     encapsulate_html "$html_source" > $tmpfile
-
-    firefox $tmpfile
 }
 
 function action_pack() {
@@ -283,7 +288,10 @@ function action_pack() {
 }
 
 function action_edit() {
-    vim  $logdir
+    vim $logdir
+	cd $logdir
+	commit all
+	cd -
 }
 
 while true ; do
@@ -291,7 +299,7 @@ while true ; do
         attach) shift; attach $@ ; exit ;;
 		query) shift; action_query $@ ; exit ;;
         view) shift; action_view $@ ; exit ;;
-		html) shift; action_html $@ ; exit ;;
+		html) shift; action_html $@ ; firefox $tmpfile ; exit ;;
         pack) shift; action_pack $@ ; exit ;;
         edit) shift; action_edit $@ ; exit ;;
         "") break ;;
