@@ -67,11 +67,11 @@ function attach() {
     while true ; do
         case "$1" in
             "") break ;;
-            *) cp $1 $attach_dir/ ; shift ;;
+            *) cp "$1" "$attach_dir"/ ; shift ;;
         esac
     done
 
-    commit $attach_dir
+    commit "$attach_dir"
 }
 
 function validdate() {
@@ -291,12 +291,18 @@ function action_edit() {
     vim $logdir
 	cd $logdir
 	commit all
+    for modified in $(git diff-tree --no-commit-id --name-only -r HEAD)
+    do
+        if [ ${modified: -3} == ".md" ]; then
+            encapsulate_html "$(html "${modified%.md}")" > ${modified%.md}.html
+        fi
+    done
 	cd -
 }
 
 while true ; do
     case "$1" in
-        attach) shift; attach $@ ; exit ;;
+        attach) shift; attach "$@" ; exit ;;
 		query) shift; action_query $@ ; exit ;;
         view) shift; action_view $@ ; exit ;;
 		html) shift; action_html $@ ; firefox $tmpfile ; exit ;;
